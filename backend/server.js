@@ -21,7 +21,7 @@ const swaggerOptions = {
             description: 'Vendor Menu Scraper API',
         },
         servers: [
-            { url: process.env.API_BASE_URL || "parkday-takehome-production.up.railway.app:3000" }  // Dynamically set based on environment, you'd want to set then env in your deployment dashboard too.
+            { url: process.env.API_BASE_URL || "http://localhost:3000" }  // Dynamically set based on environment, you'd want to set then env in your deployment dashboard too.
         ]
     },
     apis: ["./server.js"],
