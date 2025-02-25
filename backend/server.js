@@ -4,6 +4,7 @@ const knex = require('knex')(require('./knexfile').development);
 const { execSync } = require('child_process');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('koa2-swagger-ui');
+const axios = require('axios');
 
 const app = new Koa();
 const router = new Router();
@@ -247,17 +248,42 @@ router.post('/vendors/:id/scrape', async (ctx) => {
  * /vendors/{id}:
  *   delete:
  *     summary: Delete a vendor
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The ID of the vendor to delete
+ *     responses:
+ *       200:
+ *         description: Vendor deleted successfully
+ *       404:
+ *         description: Vendor not found
  */
 router.delete('/vendors/:id', async (ctx) => {
-    console.log(`[server.js] Deleting vendor ${ctx.params.id}`);
-    const deleted = await knex('vendors').where({ id: ctx.params.id }).del();
+    console.log(`[server.js] Attempting to delete vendor ${ctx.params.id}`);
 
-    if (!deleted) {
+    const vendor = await knex('vendors').where({ id: ctx.params.id }).first();
+
+    if (!vendor) {
+        console.error(`[server.js] Vendor ID ${ctx.params.id} not found`);
         ctx.status = 404;
         ctx.body = { error: 'Vendor not found' };
         return;
     }
 
+    console.log(`[server.js] Vendor found: ${vendor.vendor_name}, proceeding with deletion...`);
+
+    // Delete all meals associated with the vendor
+    await knex('meals').where({ vendor_id: ctx.params.id }).del();
+    console.log(`[server.js] Deleted meals associated with vendor ${ctx.params.id}`);
+
+    // Delete the vendor
+    await knex('vendors').where({ id: ctx.params.id }).del();
+    console.log(`[server.js] Vendor ${ctx.params.id} successfully deleted`);
+
+    ctx.status = 200;
     ctx.body = { status: "Vendor deleted", vendor_id: ctx.params.id };
 });
 
@@ -345,8 +371,13 @@ router.post('/vendors', async (ctx) => {
 
     let status_code = 404;
     try {
-        const response = await axios.get(menu_url);
-        if (response.status === 200) {
+        const response = await axios.get(menu_url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
+            }
+        });
+        console.log(`[server.js] status: ${response.status}`);
+        if (response.status == 200) {
             status_code = 200;
         }
     } catch (error) {
