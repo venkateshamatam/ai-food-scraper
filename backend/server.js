@@ -20,10 +20,13 @@ const swaggerOptions = {
             version: '1.0.0',
             description: 'Vendor Menu Scraper API',
         },
-        servers: [{ url: "http://localhost:3000" }]
+        servers: [
+            { url: process.env.API_BASE_URL || "http://localhost:3000" }  // Dynamically set based on environment, you'd want to set then env in your deployment dashboard too.
+        ]
     },
     apis: ["./server.js"],
 };
+
 const swaggerDocs = swaggerJsdoc(swaggerOptions);
 app.use(swaggerUi.koaSwagger({ routePrefix: '/docs', swaggerOptions: { spec: swaggerDocs } }));
 
