@@ -4,7 +4,7 @@ import sys
 
 # FetchFox API Config
 host = 'https://fetchfox.ai'
-api_key = 'ff_w31dsehgv10b3vzygud4zh8zp9de5qqtl50cv7yl'
+api_key = 'ff_w31dsehgv10b3vzygud4zh8zp9de5qqtl50cv7yl' # Move this to .env ASAP 
 
 def fetch_menu_data(vendor_id, menu_url):
     """
