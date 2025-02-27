@@ -429,7 +429,8 @@ node server.js
 ```
 
 >  **Important:** If you don't see the "Database Connection Succeeded" log within a few seconds of server startup, the connection likely failed and will eventually time out.
-  
+
+- The server will be running on localhost:3000 and the swagger API docs on localhost:3000/docs
 
 ### Step 3: Frontend Setup
 
@@ -445,7 +446,7 @@ npm run web
 
 ```
 
-- Open your browser in **mobile mode** for an app-like experience.
+- Open localhost:8081 on your browser in **mobile mode** for an app-like experience.
 
 - To run on **Android or iOS**, you might want to have **Android Studio** or **Xcode** installed.
 
