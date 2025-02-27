@@ -326,6 +326,32 @@ There are multiple areas where the system can be enhanced to improve scalability
 - **PostgreSQL**: v14.13
 
   
+### Setup using Docker (Make sure you have Docker Compose Installed)
+
+#### Step 1: Clone the Repository
+
+```bash
+
+git clone https://github.com/venkateshamatam/ai-food-scraper.git
+
+cd ai-food-scraper
+
+```
+
+#### Step 2: Update the `docker-compose.yml` file with your Fetch Fox API key
+
+Get a fetchfox API key from fetchfox.ai and update it in the `docker-compose.yml` file that's present in the root directory. 
+
+Once you're dong updating it - run the below command:
+
+```bash
+docker-compose up --build
+docker ps # to check if all containers are running
+```
+
+
+- The API Server will be running on localhost:3000 and the swagger API docs on localhost:3000/docs. The UI will be on localhost:8081. 
+
 
 ### Manual Setup
 
