@@ -30,22 +30,29 @@ const VendorScreen = ({ navigation }) => {
     return colors[Math.floor(Math.random() * colors.length)];
   };
 
+  const resetModalFields = () => {
+    setVendorName("");
+    setVendorWebsite("");
+    setVendorMenuUrl("");
+  };
   // Fetch vendors when the component mounts
   useEffect(() => {
     const fetchVendors = async () => {
       try {
         const data = await getVendors();
         // Handle case where no vendors are found
-        if (!Array.isArray(data) || data.length === 0)
-          throw new Error("No vendors found");
-        setVendors(data);
+        if (!Array.isArray(data) || data.length === 0) {
+          setError("No vendors found! Add a vendor to get started.");
+        } else {
+          setVendors(data);
 
-        // Generate and set colors for each vendor
-        const colors = {};
-        data.forEach(vendor => {
-          colors[vendor.vendor_name] = getRandomColor();
-        });
-        setVendorColors(colors);
+          // Generate and set colors for each vendor
+          const colors = {};
+          data.forEach(vendor => {
+            colors[vendor.vendor_name] = getRandomColor();
+          });
+          setVendorColors(colors);
+        }
       } catch (err) {
         console.error("Error fetching vendors:", err);
         setError(err.message);
@@ -66,16 +73,24 @@ const VendorScreen = ({ navigation }) => {
     try {
       const newVendor = await addVendor(vendorName, vendorWebsite, vendorMenuUrl);
       Alert.alert("Success", "Vendor added successfully!");
-      setVendors((prevVendors) => [...prevVendors, newVendor]); // Append new vendor to the list
+      setVendors((prevVendors) => {
+        const updatedVendors = [...prevVendors, newVendor];
+        // Generate and set color for the new vendor
+        setVendorColors((prevColors) => ({
+          ...prevColors,
+          [newVendor.vendor_name]: getRandomColor(),
+        }));
+        return updatedVendors;
+      });
+      setError(""); // Clear the error message
       setModalVisible(false);
+      resetModalFields(); // Reset modal fields after adding a vendor
     } catch (error) {
       Alert.alert("Error", error.message || "Failed to add vendor. Try again.");
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  // Set up the header button to add a new vendor
+  };  // Set up the header button to add a new vendor
   React.useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
@@ -87,22 +102,26 @@ const VendorScreen = ({ navigation }) => {
   }, [navigation]);
 
   // Show loading indicator while fetching vendors
-  if (loading)
+  if (loading) {
     return <ActivityIndicator size="large" color="#0000ff" style={styles.loader} />;
-  // Show error message if there is an error fetching vendors
-  if (error) return <Text style={styles.error}>{error}</Text>;
+  }
 
   return (
     <View style={styles.container}>
-      <FlatList
-        data={vendors}
-        keyExtractor={(item) => item.vendor_name}
-        renderItem={({ item }) => (
-          <VendorCard vendor={item} color={vendorColors[item.vendor_name]} onPress={() => navigation.navigate("MenuScreen", { vendorId: item.id })} />
-        )}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={true}
-      />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {vendors.length === 0 && !error ? (
+        <Text style={styles.noVendorsText}>No vendors yet! Get started by adding a vendor.</Text>
+      ) : (
+        <FlatList
+          data={vendors}
+          keyExtractor={(item) => item.vendor_name}
+          renderItem={({ item }) => (
+            <VendorCard vendor={item} color={vendorColors[item.vendor_name]} onPress={() => navigation.navigate("MenuScreen", { vendorId: item.id })} />
+          )}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={true}
+        />
+      )}
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
@@ -140,6 +159,12 @@ const styles = StyleSheet.create({
     color: "red",
     textAlign: "center",
     marginTop: 20,
+  },
+  noVendorsText: {
+    textAlign: "center",
+    marginTop: 20,
+    fontSize: 16,
+    color: "#000",
   },
   listContent: {
     paddingBottom: 20,

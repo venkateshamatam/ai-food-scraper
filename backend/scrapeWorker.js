@@ -40,9 +40,9 @@ const processQueue = async () => {
                 return;
             }
 
-            console.log(`[scrapeWorker.js] ✅ Storing ${menuData.length} meals in the database...`);
+            console.log(`[scrapeWorker.js] Storing ${menuData.length} meals in the database...`);
 
-            // ✅ Store meals in PostgreSQL
+            // Store meals in PostgreSQL
             await Promise.all(menuData.map(meal => {
                 return knex('meals').insert({
                     vendor_id: vendor_id,
