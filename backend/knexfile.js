@@ -3,21 +3,22 @@
 /**
  * @type { Object.<string, import("knex").Knex.Config> }
  */
-
 require('dotenv').config();
 
 module.exports = {
   development: {
     client: 'pg',
     connection: {
-      connectionString: process.env.DATABASE_PUBLIC_URL || 'postgresql://postgres:eYHRWsdroQDuRkmPEQeoOUGPzaHqgQem@turntable.proxy.rlwy.net:13596/railway',
-      ssl: { rejectUnauthorized: false } // Required for secure Railway connections
+      host: process.env.DB_HOST || 'localhost',
+      user: process.env.DB_USER || 'parkday_user',
+      password: process.env.DB_PASSWORD || 'parkday_pass',
+      database: process.env.DB_NAME || 'parkday'
     },
-    migrations: {
-      directory: './migrations'
+    pool: {
+      min: 2,
+      max: 20
     },
-    seeds: {
-      directory: './seeds'
-    }
+    migrations: { directory: './migrations' },
+    seeds: { directory: './seeds' }
   }
 };
