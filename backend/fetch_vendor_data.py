@@ -1,23 +1,23 @@
 import json
 import requests
 import sys
+import os
 
 # FetchFox API Config
+api_key = os.getenv('FETCH_FOX_API_KEY')
 host = 'https://fetchfox.ai'
-api_key = 'ff_w31dsehgv10b3vzygud4zh8zp9de5qqtl50cv7yl' # Move this to .env ASAP 
 
-def fetch_menu_data(vendor_id, menu_url):
+def fetch_vendor_data(vendor_url):
     """
-    Fetch menu data from FetchFox API and return JSON (without storing in DB).
+    Fetch vendor metadata from FetchFox API and return JSON with structured third-party review links.
     """
 
-    # FetchFox Workflow
     workflow = {
         "steps": [
             {
                 "name": "const",
                 "args": {
-                    "items": [{"url": menu_url}],
+                    "items": [{"url": vendor_url}],
                     "maxPages": 1
                 }
             },
@@ -25,20 +25,14 @@ def fetch_menu_data(vendor_id, menu_url):
                 "name": "extract",
                 "args": {
                     "questions": {
-                        "meal_name": "What is the name of this meal? If unavailable, answer NA.",
-                        "description": "What is the description of this meal? If unavailable, answer NA.",
-                        "ingredients": "What are the ingredients of this meal? If unavailable, answer NA.",
-                        "dietary_alignment": "What is the dietary alignment of this meal? If none, answer NA.",
-                        "price": "What is the price of this meal? If unavailable, answer NA.",
                         "vendor_name": "What is the name of the vendor? If unavailable, answer NA.",
                         "website": "What is the website URL? If unavailable, answer NA.",
                         "instagram": "What is the Instagram URL? If unavailable, answer NA.",
                         "google_maps": "What is the Google Maps URL? If unavailable, answer NA.",
-                        "third_party_review_links": "What are the third-party review links? If none, answer NA.",
-                        "vendor_description": "What is the description of the vendor? If unavailable, answer NA.",
-                        "meal_photos": "What are the image URLs for the meal photos? If unavailable, answer NA.",
-                        "vendor_logo": "What is the URL for the vendor's logo? If unavailable, answer NA.",
-                        "url": "What is the URL? If unavailable, answer NA."
+                        "infatuation_link": "What is the Infatuation review URL? If unavailable, answer NA.",
+                        "eater_link": "What is the Eater review URL? If unavailable, answer NA.",
+                        "vendor_description": "Generate a high-quality description of the vendor's webpage, ingredients or any other relevant data. If unavailable, answer NA.",
+                        "vendor_logo": "What is the URL for the vendor's logo? If unavailable, answer NA."
                     },
                     "mode": "multiple",
                     "view": "html",
@@ -57,6 +51,7 @@ def fetch_menu_data(vendor_id, menu_url):
     }
 
     try:
+        # Create workflow
         workflow_resp = requests.post(f"{host}/api/v2/workflows", headers=headers, json=workflow)
         workflow_data = workflow_resp.json()
         workflow_id = workflow_data.get('id')
@@ -64,6 +59,7 @@ def fetch_menu_data(vendor_id, menu_url):
         run_resp = requests.post(f"{host}/api/v2/workflows/{workflow_id}/run", headers=headers, json={})
         job_id = run_resp.json().get('jobId')
 
+        # Poll for results
         results = None
         while True:
             job_resp = requests.get(f"{host}/api/v2/jobs/{job_id}", headers=headers)
@@ -73,20 +69,37 @@ def fetch_menu_data(vendor_id, menu_url):
             if job_data.get('done'):
                 break
 
+        # Ensure results exist
         if not results or 'items' not in results:
-            print(json.dumps({"error": "No menu items found"}))
+            print(json.dumps({"error": "No vendor metadata found"}))
             return
 
-        print(json.dumps(results['items'], indent=2))
+        # Structure the data properly
+        structured_results = []
+        for item in results['items']:
+            structured_results.append({
+                "vendor_name": item.get("vendor_name", "NA"),
+                "website": item.get("website", "NA"),
+                "instagram": item.get("instagram", "NA"),
+                "google_maps": item.get("google_maps", "NA"),
+                "vendor_description": item.get("vendor_description", "NA"),
+                "vendor_logo": item.get("vendor_logo", "NA"),
+                "review_links": {
+                    "infatuation": item.get("infatuation_link", "NA"),
+                    "eater": item.get("eater_link", "NA")
+                }
+            })
+
+        # Print structured JSON
+        print(json.dumps(structured_results, indent=2))
 
     except Exception as e:
         print(json.dumps({"error": str(e)}))
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(json.dumps({"error": "Usage: python3 fetch_menu_data.py <vendor_id> <menu_url>"}))
+    if len(sys.argv) != 2:
+        print(json.dumps({"error": "Usage: python3 fetch_vendor_data.py <vendor_url>"}))
         sys.exit(1)
 
-    vendor_id = sys.argv[1]
-    menu_url = sys.argv[2]
-    fetch_menu_data(vendor_id, menu_url)
+    vendor_url = sys.argv[1]
+    fetch_vendor_data(vendor_url)
