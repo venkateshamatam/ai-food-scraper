@@ -18,13 +18,17 @@ This project automates the extraction, enrichment, and presentation of restauran
 
 The goal is to develop a **scalable and intelligent data pipeline** that minimizes manual intervention while adapting seamlessly to new vendors.
 
+## App Previews
+
+<img width="200" alt="image" src="https://github.com/user-attachments/assets/70966a68-7d94-4b33-b0a0-cdec407de956" />
+<img width="200" alt="image" src="https://github.com/user-attachments/assets/d5aec432-32cf-4bda-97df-23a3565ae608" />
+<img width="200" alt="image" src="https://github.com/user-attachments/assets/5c98e9be-4016-4638-aa80-20e833c86d1f" />
+<img width="200" alt="image" src="https://github.com/user-attachments/assets/72a742f2-34bb-4248-9be1-9f52cf90f4c5" />
+
+
 ## Tech Stack
 
-  
-
 This project is built using technologies that ensure efficiency, scalability, and maintainability.
-
-  
 
 ### **Backend**
 
