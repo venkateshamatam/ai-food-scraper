@@ -4,13 +4,17 @@ const knex = require('knex')(require('./knexfile').development);
 const { execSync } = require('child_process');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('koa2-swagger-ui');
-const axios = require('axios');
+const cors = require("@koa/cors");
 
+const scrapeQueue = [];
 const app = new Koa();
 const router = new Router();
 const bodyParser = require('koa-bodyparser');
 app.use(bodyParser());
+const axios = require('axios');
+const { addJob } = require('./scrapeWorker'); // Import the scrapeWorker
 
+app.use(cors());
 
 const swaggerOptions = {
     swaggerDefinition: {
@@ -20,38 +24,97 @@ const swaggerOptions = {
             version: '1.0.0',
             description: 'Vendor Menu Scraper API',
         },
-        servers: [
-            { url: process.env.API_BASE_URL || "http://localhost:3000" }  // Dynamically set based on environment, you'd want to set then env in your deployment dashboard too.
-        ]
+        servers: [{ url: "http://localhost:3000" }]
     },
     apis: ["./server.js"],
 };
-
 const swaggerDocs = swaggerJsdoc(swaggerOptions);
 app.use(swaggerUi.koaSwagger({ routePrefix: '/docs', swaggerOptions: { spec: swaggerDocs } }));
 
 console.log("[server.js] Server starting...");
-
 
 /**
  * @swagger
  * /vendors:
  *   get:
  *     summary: Get all vendors
+ *     description: Fetches a list of all available vendors with metadata.
  *     responses:
  *       200:
  *         description: List of vendors
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   vendor_name:
+ *                     type: string
+ *                   menu_url:
+ *                     type: string
+ *                   vendor_description:
+ *                     type: string
+ *                   website:
+ *                     type: string
+ *                   social_links:
+ *                     type: object
+ *                     properties:
+ *                       instagram:
+ *                         type: string
+ *                       google_maps:
+ *                         type: string
+ *                   review_links:
+ *                     type: object
+ *                     properties:
+ *                       infatuation:
+ *                         type: string
+ *                       eater:
+ *                         type: string
+ *                   status_code:
+ *                     type: integer
+ *                   last_updated:
+ *                     type: string
+ *                     format: date-time
  */
+
 router.get('/vendors', async (ctx) => {
-    console.log("[server.js] 📜 Fetching all vendors...");
-    ctx.body = await knex('vendors').select('*');
+    console.log("[server.js] Fetching all vendors...");
+
+    try {
+        const vendors = await knex('vendors').select('*');
+
+        // Transform data to match the expected response structure
+        ctx.body = vendors.map(vendor => ({
+            id: vendor.id,
+            vendor_name: vendor.vendor_name,
+            menu_url: vendor.menu_url,
+            vendor_description: vendor.vendor_description,
+            website: vendor.website,
+			vendor_logo: vendor.vendor_logo,  
+            social_links: {
+                instagram: vendor.instagram,
+                google_maps: vendor.google_maps
+            },
+            review_links: typeof vendor.review_links === 'string' ? JSON.parse(vendor.review_links) : vendor.review_links, // ✅ Fixed!
+            status_code: vendor.status_code,
+            last_updated: vendor.last_updated
+        }));
+    } catch (error) {
+        console.error("[server.js] Error fetching vendors:", error);
+        ctx.status = 500;
+        ctx.body = { error: "Internal server error" };
+    }
 });
 
 /**
  * @swagger
- * /vendors/{id}/menu:
+ * /vendors/{id}:
  *   get:
- *     summary: Get vendor menu (cached or scraped)
+ *     summary: Get vendor details
+ *     description: Retrieves detailed vendor information from the database.
  *     parameters:
  *       - in: path
  *         name: id
@@ -61,85 +124,90 @@ router.get('/vendors', async (ctx) => {
  *         description: The ID of the vendor
  *     responses:
  *       200:
- *         description: Successfully fetched menu
+ *         description: Vendor details retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 vendor_name:
+ *                   type: string
+ *                 menu_url:
+ *                   type: string
+ *                 vendor_description:
+ *                   type: string
+ *                 website:
+ *                   type: string
+ *                 social_links:
+ *                   type: object
+ *                   properties:
+ *                     instagram:
+ *                       type: string
+ *                     google_maps:
+ *                       type: string
+ *                 review_links:
+ *                   type: object
+ *                   properties:
+ *                     infatuation:
+ *                       type: string
+ *                     eater:
+ *                       type: string
+ *                 status_code:
+ *                   type: integer
+ *                 last_updated:
+ *                   type: string
+ *                   format: date-time
  *       404:
  *         description: Vendor not found
- *       500:
- *         description: Scraper failed or no meals found
  */
-router.get('/vendors/:id/menu', async (ctx) => {
-    console.log(`[server.js] Request for vendor ${ctx.params.id}`);
 
-    const vendor = await knex('vendors').where({ id: ctx.params.id }).first();
-    if (!vendor) {
-        console.error(`[server.js] Vendor ID ${ctx.params.id} not found`);
-        ctx.status = 200;
-        ctx.body = { error: 'Vendor not found' };
-        return;
-    }
-
-    console.log(`[server.js] Found vendor: ${vendor.vendor_name}`);
-
-    const meals = await knex('meals').where({ vendor_id: ctx.params.id });
-    if (meals.length > 0) {
-        console.log(`[server.js] Serving ${meals.length} cached meals`);
-        ctx.body = meals;
-        return;
-    }
-
-    console.log(`[server.js] No cached meals. Scraping menu from: ${vendor.menu_url}`);
+router.get('/vendors/:id', async (ctx) => {
+    console.log(`[server.js] Fetching vendor details for ID ${ctx.params.id}`);
 
     try {
-        const pythonOutput = execSync(`python3 fetch_menu_data.py ${vendor.id} "${vendor.menu_url}"`, { encoding: 'utf-8' });
-        const menuData = JSON.parse(pythonOutput);
+        const vendor = await knex('vendors').where({ id: ctx.params.id }).first();
 
-        if (!menuData || menuData.length === 0) {
-            console.error(`[server.js] Scraper ran but returned empty results`);
-            ctx.status = 500;
-            ctx.body = { error: 'Failed to retrieve scraped meals' };
+        if (!vendor) {
+            console.error(`[server.js] Vendor ID ${ctx.params.id} not found`);
+            ctx.status = 404;
+            ctx.body = { error: 'Vendor not found' };
             return;
         }
 
-        console.log(`[server.js] Storing ${menuData.length} meals in the database...`);
-
-        // ✅ Store flattened data in PostgreSQL
-        await Promise.all(menuData.map(meal => {
-            return knex('meals').insert({
-                vendor_id: vendor.id,
-                meal_name: meal.meal_name,
-                description: meal.description,
-                ingredients: meal.ingredients,
-                dietary_alignment: meal.dietary_alignment,
-                price: meal.price,
-                meal_photos: meal.meal_photos,
-                website: meal.website,
-                instagram: meal.instagram,
-                google_maps: meal.google_maps,
-                third_party_review_links: meal.third_party_review_links,
-                vendor_description: meal.vendor_description,
-                vendor_logo: meal.vendor_logo,
-                url: meal.url
-            }).onConflict(['vendor_id', 'meal_name']).ignore();
-        }));
-
-        console.log(`[server.js] Successfully stored meals for ${vendor.vendor_name}`);
-        
-        // ✅ Return the stored data
-        ctx.body = menuData;
-
+        // ✅ Format the response with structured links
+        ctx.body = {
+            id: vendor.id,
+            vendor_name: vendor.vendor_name,
+            menu_url: vendor.menu_url,
+            vendor_description: vendor.vendor_description,
+            website: vendor.website,
+			vendor_logo: vendor.vendor_logo,
+            social_links: {
+                instagram: vendor.instagram,
+                google_maps: vendor.google_maps,
+            },
+            review_links: {
+                infatuation: vendor.infatuation_link,
+                eater: vendor.eater_link,
+            },
+            status_code: vendor.status_code,
+            last_updated: vendor.last_updated,
+        };
     } catch (error) {
-        console.error(`[server.js] Scraper failed:`, error);
+        console.error(`[server.js] Error fetching vendor:`, error);
         ctx.status = 500;
-        ctx.body = { error: 'Scraper failed' };
+        ctx.body = { error: 'Internal server error' };
     }
 });
 
-
 /**
  * @swagger
- * /vendors/{id}/status:
+ * /vendors/{id}/meals:
  *   get:
- *     summary: Get vendor details & last updated timestamp
+ *     summary: Get all meals for a given vendor
+ *     description: Fetches meals for a specific vendor. If no cached meals exist, it triggers scraping.
  *     parameters:
  *       - in: path
  *         name: id
@@ -149,47 +217,266 @@ router.get('/vendors/:id/menu', async (ctx) => {
  *         description: The ID of the vendor
  *     responses:
  *       200:
- *         description: Successfully fetched vendor status
+ *         description: List of meals for the vendor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   meal_id:
+ *                     type: integer
+ *                   meal_name:
+ *                     type: string
+ *                   description:
+ *                     type: string
+ *                   ingredients:
+ *                     type: string
+ *                   dietary_alignment:
+ *                     type: string
+ *                   price:
+ *                     type: string
+ *                   meal_photos:
+ *                     type: string
  *       404:
  *         description: Vendor not found
+ *       500:
+ *         description: Scraper failed or internal server error
  */
-router.get('/vendors/:id/status', async (ctx) => {
-    console.log(`[server.js] Checking status for vendor ${ctx.params.id}`);
-    const vendor = await knex('vendors').where({ id: ctx.params.id }).first();
 
-    if (!vendor) {
-        ctx.status = 404;
-        ctx.body = { error: 'Vendor not found' };
+router.get('/vendors/:id/meals', async (ctx) => {
+    console.log(`[server.js] Fetching meals for vendor ${ctx.params.id}`);
+
+    try {
+        const vendor = await knex('vendors').where({ id: ctx.params.id }).first();
+        if (!vendor) {
+            console.error(`[server.js] Vendor ID ${ctx.params.id} not found`);
+            ctx.status = 404;
+            ctx.body = { error: "Vendor not found" };
+            return;
+        }
+
+        const meals = await knex('meals').where({ vendor_id: ctx.params.id });
+
+        if (meals.length > 0) {
+            console.log(`[server.js] Serving ${meals.length} cached meals`);
+            ctx.body = meals;
+            return;
+        }
+
+        console.log(`[server.js] No cached meals. Scraping menu from: ${vendor.menu_url}`);
+
+        addJob({ vendor_id: vendor.id, menu_url: vendor.menu_url });
+
+        ctx.status = 202;
+        ctx.body = { status: 202, message: 'Scraping in progress, please check back later for the meals' };
+
+    } catch (error) {
+        console.error(`[server.js] Error fetching meals:`, error);
+        ctx.status = 500;
+        ctx.body = { error: 'Internal server error' };
+    }
+});
+
+/**
+ * @swagger
+ * /vendors:
+ *   post:
+ *     summary: Add a new vendor
+ *     description: Adds a vendor with minimal details and triggers metadata scraping.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - vendor_name
+ *               - website
+ *               - menu_url
+ *             properties:
+ *               vendor_name:
+ *                 type: string
+ *               website:
+ *                 type: string
+ *               menu_url:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Vendor added successfully, metadata fetching triggered.
+ *       400:
+ *         description: Invalid input or vendor URL unreachable.
+ *       500:
+ *         description: Server error.
+ */
+router.post('/vendors', async (ctx) => {
+    const { vendor_name, website, menu_url } = ctx.request.body;
+
+    if (!vendor_name || !website || !menu_url) {
+        ctx.status = 400;
+        ctx.body = { error: "vendor_name, website, and menu_url are required" };
         return;
     }
 
+    console.log(`[server.js] Adding new vendor: ${vendor_name}`);
+
+    let status_code = 404;
+    try {
+        const response = await axios.get(website);
+        if (response.status === 200) {
+            status_code = 200;
+        }
+    } catch (error) {
+        console.error(`[server.js] Website URL not reachable: ${website}`);
+        ctx.status = 400;
+        ctx.body = { error: "Website URL is unreachable" };
+        return;
+    }
+
+    // ✅ Insert basic vendor details
+    const [vendor] = await knex('vendors')
+        .insert({ 
+            vendor_name, 
+            website,  // Fixed: Using `website` instead of `vendor_url`
+            menu_url, 
+            status_code, 
+            last_updated: knex.fn.now()
+        })
+        .returning('*');
+
+    console.log(`[server.js] Triggering vendor metadata scraping...`);
+
+    try {
+        const pythonOutput = execSync(`python3 fetch_vendor_data.py "${website}"`, { encoding: 'utf-8' });
+        const scrapedData = JSON.parse(pythonOutput);
+
+        if (!scrapedData || scrapedData.length === 0) {
+            console.warn(`[server.js] Scraper ran but returned empty results`);
+        } else {
+            const vendorMetadata = scrapedData[0]; // Assuming one vendor per fetch
+
+            // ✅ Update vendor with scraped metadata
+            await knex('vendors')
+                .where({ id: vendor.id })
+                .update({
+                    vendor_description: vendorMetadata.vendor_description || "NA",
+                    website: vendorMetadata.website || "NA",
+                    instagram: vendorMetadata.instagram || "NA",
+                    google_maps: vendorMetadata.google_maps || "NA",
+                    review_links: JSON.stringify({
+                        infatuation: vendorMetadata.infatuation_link || "NA",
+                        eater: vendorMetadata.eater_link || "NA",
+                        resy: vendorMetadata.resy_link || "NA",
+                        opentable: vendorMetadata.opentable_link || "NA",
+                        yelp: vendorMetadata.yelp_link || "NA"
+                    }),
+                    vendor_logo: vendorMetadata.vendor_logo || "NA",
+                    last_updated: knex.fn.now()
+                });
+
+            console.log(`[server.js] Vendor metadata updated for ${vendor.vendor_name}`);
+        }
+    } catch (error) {
+        console.error(`[server.js] Vendor metadata scraping failed:`, error);
+    }
+
+    // Fetch the updated vendor details
+    const updatedVendor = await knex('vendors').where({ id: vendor.id }).first();
+
+    ctx.status = 201;
     ctx.body = {
-        vendor_name: vendor.vendor_name,
-        menu_url: vendor.menu_url,
-        status_code: vendor.status_code,
-        last_updated: vendor.last_updated,
-    };
+        id: updatedVendor.id,
+        vendor_name: updatedVendor.vendor_name,
+        vendor_description: updatedVendor.vendor_description,
+        vendor_logo: updatedVendor.vendor_logo,
+        website: updatedVendor.website,
+        social_links: {
+            instagram: updatedVendor.instagram
+        }
+    };    
+
 });
 
 /**
  * @swagger
  * /vendors/{id}/scrape:
  *   post:
- *     summary: Force scrape a vendor menu
+ *     summary: Force scrape a vendor's menu
+ *     description: Scrapes a vendor's menu and updates the database with new meal data.
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
  *           type: integer
- *         description: The ID of the vendor
+ *         description: The ID of the vendor to scrape
  *     responses:
  *       200:
- *         description: Scraping started successfully
+ *         description: Scraping completed successfully, returning updated meals
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "Scraping completed"
+ *                 vendor_id:
+ *                   type: integer
+ *                   example: 1
+ *                 updated_meals:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1001
+ *                       vendor_id:
+ *                         type: integer
+ *                         example: 1
+ *                       meal_name:
+ *                         type: string
+ *                         example: "Grilled Chicken Salad"
+ *                       description:
+ *                         type: string
+ *                         example: "Fresh greens with grilled chicken, avocado, and balsamic dressing"
+ *                       ingredients:
+ *                         type: string
+ *                         example: "Lettuce, Chicken, Avocado, Balsamic Dressing"
+ *                       dietary_alignment:
+ *                         type: string
+ *                         example: "Gluten-Free, High-Protein"
+ *                       price:
+ *                         type: string
+ *                         example: "$14.99"
+ *                       meal_photos:
+ *                         type: string
+ *                         example: "https://example.com/images/grilled_chicken_salad.jpg"
+ *                       url:
+ *                         type: string
+ *                         example: "https://example.com/menu/grilled-chicken-salad"
  *       404:
  *         description: Vendor not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Vendor not found"
  *       500:
- *         description: Scraping failed
+ *         description: Scraping failed or internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Scraping failed"
  */
 router.post('/vendors/:id/scrape', async (ctx) => {
     console.log(`[server.js] Force scraping vendor ${ctx.params.id}`);
@@ -204,11 +491,11 @@ router.post('/vendors/:id/scrape', async (ctx) => {
 
     try {
         console.log(`[server.js] Running scraper for vendor ${vendor.vendor_name}`);
-        
-        const pythonOutput = execSync(`python3 fetch_menu_data.py ${vendor.id} "${vendor.menu_url}"`, { encoding: 'utf-8' });
+
+        const pythonOutput = execSync(`python3 fetch_meal_data.py "${vendor.menu_url}" "meals_output.csv"`, { encoding: 'utf-8' });
         const menuData = JSON.parse(pythonOutput);
 
-        if (!menuData || menuData.length === 0) {
+        if (!Array.isArray(menuData) || menuData.length === 0) {
             console.error(`[server.js] Scraper ran but returned empty results`);
             ctx.status = 500;
             ctx.body = { error: 'Failed to retrieve scraped meals' };
@@ -227,22 +514,26 @@ router.post('/vendors/:id/scrape', async (ctx) => {
             dietary_alignment: meal.dietary_alignment,
             price: meal.price,
             meal_photos: meal.meal_photos,
-            website: meal.website,
-            instagram: meal.instagram,
-            google_maps: meal.google_maps,
-            third_party_review_links: meal.third_party_review_links,
-            vendor_description: meal.vendor_description,
-            vendor_logo: meal.vendor_logo,
-            url: meal.url
+            url: meal.url,
         })));
 
         console.log(`[server.js] Successfully updated meals for ${vendor.vendor_name}`);
-        ctx.body = { status: "Scraping completed", vendor_id: vendor.id };
+
+        // ✅ Return only the updated meals with new structure
+        const updatedMeals = await knex('meals').where({ vendor_id: vendor.id }).select('*');
+
+        ctx.body = {
+            status: "Scraping completed",
+            vendor_id: vendor.id,
+            updated_meals: updatedMeals
+        };
 
     } catch (error) {
         console.error(`[server.js] Scraping failed:`, error);
+
+        // Don't delete old meals if scraping fails
         ctx.status = 500;
-        ctx.body = { error: 'Scraping failed' };
+        ctx.body = { error: 'Scraping failed. Previous meals were retained.' };
     }
 });
 
@@ -257,37 +548,46 @@ router.post('/vendors/:id/scrape', async (ctx) => {
  *         required: true
  *         schema:
  *           type: integer
- *         description: The ID of the vendor to delete
+ *         description: The ID of the vendor
  *     responses:
  *       200:
  *         description: Vendor deleted successfully
  *       404:
  *         description: Vendor not found
+ *       500:
+ *         description: Internal server error
  */
 router.delete('/vendors/:id', async (ctx) => {
-    console.log(`[server.js] Attempting to delete vendor ${ctx.params.id}`);
+    console.log(`[server.js] Deleting vendor ${ctx.params.id}`);
 
-    const vendor = await knex('vendors').where({ id: ctx.params.id }).first();
-
-    if (!vendor) {
-        console.error(`[server.js] Vendor ID ${ctx.params.id} not found`);
-        ctx.status = 404;
-        ctx.body = { error: 'Vendor not found' };
+    const vendorId = parseInt(ctx.params.id, 10); // Ensure it's an integer
+    if (isNaN(vendorId)) {
+        ctx.status = 400;
+        ctx.body = { error: 'Invalid vendor ID' };
         return;
     }
 
-    console.log(`[server.js] Vendor found: ${vendor.vendor_name}, proceeding with deletion...`);
+    try {
+        // Check if the vendor exists before deleting
+        const vendor = await knex('vendors').where({ id: vendorId }).first();
+        if (!vendor) {
+            console.error(`[server.js] Vendor ID ${vendorId} not found`);
+            ctx.status = 404;
+            ctx.body = { error: 'Vendor not found' };
+            return;
+        }
 
-    // Delete all meals associated with the vendor
-    await knex('meals').where({ vendor_id: ctx.params.id }).del();
-    console.log(`[server.js] Deleted meals associated with vendor ${ctx.params.id}`);
+        // Delete the vendor
+        await knex('vendors').where({ id: vendorId }).del();
 
-    // Delete the vendor
-    await knex('vendors').where({ id: ctx.params.id }).del();
-    console.log(`[server.js] Vendor ${ctx.params.id} successfully deleted`);
+        console.log(`[server.js] Vendor ID ${vendorId} deleted successfully`);
+        ctx.body = { status: "Vendor deleted", vendor_id: vendorId };
 
-    ctx.status = 200;
-    ctx.body = { status: "Vendor deleted", vendor_id: ctx.params.id };
+    } catch (error) {
+        console.error(`[server.js] Error deleting vendor:`, error);
+        ctx.status = 500;
+        ctx.body = { error: 'Internal server error' };
+    }
 });
 
 /**
@@ -342,92 +642,8 @@ router.get('/meals', async (ctx) => {
     console.log(`[server.js] Fetching all meals...`);
     const meals = await knex('meals').select('*');
 
-    console.log(`[server.js] Meals Fetched:`, meals);  // 🔍 Debugging Log
+    console.log(`[server.js] Meals Fetched:`, meals); 
 
-    ctx.body = meals;
-});
-
-
-/**
- * @swagger
- * /vendors:
- *   post:
- *     summary: Add a new vendor
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               vendor_name:
- *                 type: string
- *               menu_url:
- *                 type: string
- *     responses:
- *       201:
- *         description: Vendor added successfully
- */
-router.post('/vendors', async (ctx) => {
-    const { vendor_name, menu_url } = ctx.request.body;
-    console.log(`[server.js] Adding new vendor: ${vendor_name}`);
-
-    let status_code = 404;
-    try {
-        const response = await axios.get(menu_url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
-            }
-        });
-        console.log(`[server.js] status: ${response.status}`);
-        if (response.status == 200) {
-            status_code = 200;
-        }
-    } catch (error) {
-        console.log(`[server.js] URL not reachable: ${menu_url}`);
-    }
-
-    const [vendor] = await knex('vendors')
-        .insert({ vendor_name, menu_url, status_code, last_updated: knex.fn.now() })
-        .returning('*');
-
-    ctx.status = 201;
-    ctx.body = vendor;
-});
-
-/**
- * @swagger
- * /vendors/{id}/meals:
- *   get:
- *     summary: Get all meals for a given vendor
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: List of meals for vendor
- *       404:
- *         description: Vendor not found
- */
-router.get('/vendors/:id/meals', async (ctx) => {
-    console.log(`[server.js] Fetching meals for vendor ${ctx.params.id}`);
-
-    // ✅ Check if vendor exists
-    const vendor = await knex('vendors').where({ id: ctx.params.id }).first();
-    if (!vendor) {
-        console.error(`[server.js] Vendor ID ${ctx.params.id} not found`);
-        ctx.status = 404;
-        ctx.body = { error: "Vendor not found" };
-        return;
-    }
-
-    // ✅ Fetch meals for vendor
-    const meals = await knex('meals').where({ vendor_id: ctx.params.id });
-
-    // ✅ Return meals (even if empty)
     ctx.body = meals;
 });
 
