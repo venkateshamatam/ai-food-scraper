@@ -10,9 +10,9 @@ module.exports = {
     client: 'pg',
     connection: {
       host: process.env.DB_HOST || 'localhost',
-      user: process.env.DB_USER || 'parkday_user',
-      password: process.env.DB_PASSWORD || 'parkday_pass',
-      database: process.env.DB_NAME || 'parkday'
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || 'ilovepostgres',
+      database: process.env.DB_NAME || 'postgres'
     },
     pool: {
       min: 2,

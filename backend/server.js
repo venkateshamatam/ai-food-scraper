@@ -31,7 +31,21 @@ const swaggerOptions = {
 const swaggerDocs = swaggerJsdoc(swaggerOptions);
 app.use(swaggerUi.koaSwagger({ routePrefix: '/docs', swaggerOptions: { spec: swaggerDocs } }));
 
+
 console.log("[server.js] Server starting...");
+
+async function checkDatabaseConnection() {
+    try {
+        await knex.raw('SELECT 1+1 AS result');
+        console.log("[server.js] Database connection successful");
+    } catch (error) {
+        console.error("[server.js] Database connection error:", error);
+        process.exit(1); // Exit the process with an error code
+    }
+}
+
+// Check the database connection when the server starts
+checkDatabaseConnection();
 
 /**
  * @swagger
