@@ -1,8 +1,6 @@
 
 # AI-Powered Food Intelligence & Data Processing
 
-## Overview
-
 This project automates the extraction, enrichment, and presentation of restaurant menu data at scale. The system is designed to:
 
 
